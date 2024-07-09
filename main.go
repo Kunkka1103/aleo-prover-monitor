@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"flag"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -54,10 +53,10 @@ func fetchDataAndPush() {
 	log.Println("Fetching data and pushing to Pushgateway")
 
 	durations := map[string]int{
-		"15m":  900,
-		"1h":   3600,
-		"12h":  43200,
-		"24h":  86400,
+		"15m": 900,
+		"1h":  3600,
+		"12h": 43200,
+		"24h": 86400,
 	}
 
 	for _, address := range addresses {
