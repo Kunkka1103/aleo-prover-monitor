@@ -5,7 +5,7 @@ GOCLEAN=$(GOCMD) clean
 GOTEST=$(GOCMD) test
 GOFMT=$(GOCMD) fmt
 GOVET=$(GOCMD) vet
-BINARY_NAME=prover_monitor
+BINARY_NAME=aleo-prover-monitor
 
 # Arguments for the program
 PUSHGATEWAY_URL=http://your_pushgateway_address:9091
