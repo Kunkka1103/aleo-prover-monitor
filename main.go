@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -82,13 +83,18 @@ func init() {
 func main() {
 	pflag.StringVar(&pushgatewayURL, "pushgateway", "http://pushgateway:9091", "URL of the Pushgateway")
 	pflag.StringVar(&apiBaseURL, "api", "http://localhost:8088", "Base URL of the API")
-	pflag.StringArrayVar(&addresses, "addresses", []string{}, "Addresses to monitor")
+	pflag.StringArrayVar(&addresses, "addresses", []string{
+		"aleo1ul89ek6egwjtljy6yhmyteyu9y077ruahwggzfh6sgjqp890y5xs6mz9pe",
+		"aleo1zp00ltnw23uvdq4spxax3zp84mt7pkvgyerlukxk5t443k6f5v9s9wem4l",
+	}, "Addresses to monitor")
 
 	pflag.DurationVar(&defaultDuration, "interval", 5*time.Minute, "Interval for fetching data")
 	pflag.Parse()
 
 	ticker := time.NewTicker(defaultDuration)
 	defer ticker.Stop()
+
+	log.Println("Starting prover monitor")
 
 	for {
 		select {
@@ -99,6 +105,8 @@ func main() {
 }
 
 func fetchDataAndPush() {
+	log.Println("Fetching data and pushing to Pushgateway")
+
 	durations := map[string]int{
 		"15m":  900,
 		"1h":   3600,
@@ -107,12 +115,20 @@ func fetchDataAndPush() {
 	}
 
 	for durationName, duration := range durations {
+		log.Printf("Fetching prover speed for duration %s", durationName)
 		fetchProverSpeed(addresses, duration, durationName)
 	}
+
+	log.Println("Fetching prover reward")
 	fetchProverReward(addresses)
+
+	log.Println("Fetching prover latest height")
 	fetchProverLatestHeight(addresses)
+
+	log.Println("Fetching latest block")
 	fetchLatestBlock()
 
+	log.Println("Pushing metrics to Pushgateway")
 	if err := push.New(pushgatewayURL, "prover_metrics").
 		Collector(proverSpeed).
 		Collector(totalSpeed).
@@ -124,6 +140,8 @@ func fetchDataAndPush() {
 		Push(); err != nil {
 		log.Fatalf("Could not push to Pushgateway: %v", err)
 	}
+
+	log.Println("Metrics pushed successfully")
 }
 
 func fetchProverSpeed(addresses []string, duration int, durationName string) {
@@ -152,6 +170,7 @@ func fetchProverSpeed(addresses []string, duration int, durationName string) {
 			continue
 		}
 		proverSpeed.WithLabelValues(item.Address, durationName).Set(speed)
+		log.Printf("Set prover speed: address=%s, duration=%s, speed=%f", item.Address, durationName, speed)
 	}
 
 	totalSpeedValue, err := parseFloat(result.Data.Total)
@@ -160,6 +179,7 @@ func fetchProverSpeed(addresses []string, duration int, durationName string) {
 		return
 	}
 	totalSpeed.WithLabelValues(durationName).Set(totalSpeedValue)
+	log.Printf("Set total speed: duration=%s, total_speed=%f", durationName, totalSpeedValue)
 }
 
 func fetchProverReward(addresses []string) {
@@ -188,6 +208,7 @@ func fetchProverReward(addresses []string) {
 			continue
 		}
 		totalReward.WithLabelValues(item.Address).Set(totalRewardValue)
+		log.Printf("Set total reward: address=%s, total_reward=%f", item.Address, totalRewardValue)
 	}
 }
 
@@ -209,6 +230,7 @@ func fetchProverLatestHeight(addresses []string) {
 
 	for _, item := range result.Data {
 		proverHeight.WithLabelValues(item.Address).Set(float64(item.Height))
+		log.Printf("Set prover height: address=%s, height=%d", item.Address, item.Height)
 	}
 }
 
@@ -229,6 +251,7 @@ func fetchLatestBlock() {
 	}
 
 	latestBlockHeight.Set(float64(result.Data.Height))
+	log.Printf("Set latest block height: height=%d", result.Data.Height)
 
 	proofTargetValue, err := parseFloat(result.Data.ProofTarget)
 	if err != nil {
@@ -236,6 +259,7 @@ func fetchLatestBlock() {
 		return
 	}
 	proofTarget.Set(proofTargetValue)
+	log.Printf("Set proof target: proof_target=%f", proofTargetValue)
 
 	coinbaseRewardValue, err := parseFloat(result.Data.CoinbaseReward)
 	if err != nil {
@@ -243,6 +267,7 @@ func fetchLatestBlock() {
 		return
 	}
 	coinbaseReward.Set(coinbaseRewardValue)
+	log.Printf("Set coinbase reward: coinbase_reward=%f", coinbaseRewardValue)
 }
 
 func fetchData(url, body string) []byte {
