@@ -237,6 +237,8 @@ func fetchLatestBlock() {
 	url := fmt.Sprintf("%s/api/v1/chain/latest_block", apiBaseURL)
 	data := fetchData(url, "")
 
+	log.Printf("Raw response from latest block: %s", string(data))
+
 	var result struct {
 		Data struct {
 			Height         int    `json:"height"`
@@ -287,6 +289,8 @@ func fetchData(url, body string) []byte {
 	if err != nil {
 		log.Fatalf("Could not read response: %v", err)
 	}
+
+	log.Printf("Response from %s: %s", url, string(data))
 
 	return data
 }
