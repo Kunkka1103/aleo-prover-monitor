@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -20,64 +21,7 @@ var (
 	apiBaseURL      string
 	addresses       []string
 	defaultDuration = 5 * time.Minute
-
-	proverSpeed = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name: "prover_speed",
-			Help: "Speed of the prover",
-		},
-		[]string{"address", "duration"},
-	)
-	totalSpeed = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name: "total_speed",
-			Help: "Total speed",
-		},
-		[]string{"duration"},
-	)
-	totalReward = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name: "total_reward",
-			Help: "Total reward of the prover",
-		},
-		[]string{"address"},
-	)
-	proverHeight = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name: "prover_height",
-			Help: "Height of the prover",
-		},
-		[]string{"address"},
-	)
-	latestBlockHeight = prometheus.NewGauge(
-		prometheus.GaugeOpts{
-			Name: "latest_block_height",
-			Help: "Height of the latest block",
-		},
-	)
-	proofTarget = prometheus.NewGauge(
-		prometheus.GaugeOpts{
-			Name: "proof_target",
-			Help: "Proof target of the latest block",
-		},
-	)
-	coinbaseReward = prometheus.NewGauge(
-		prometheus.GaugeOpts{
-			Name: "coinbase_reward",
-			Help: "Coinbase reward of the latest block",
-		},
-	)
 )
-
-func init() {
-	prometheus.MustRegister(proverSpeed)
-	prometheus.MustRegister(totalSpeed)
-	prometheus.MustRegister(totalReward)
-	prometheus.MustRegister(proverHeight)
-	prometheus.MustRegister(latestBlockHeight)
-	prometheus.MustRegister(proofTarget)
-	prometheus.MustRegister(coinbaseReward)
-}
 
 func main() {
 	pflag.StringVar(&pushgatewayURL, "pushgateway", "http://pushgateway:9091", "URL of the Pushgateway")
@@ -110,53 +54,40 @@ func fetchDataAndPush() {
 	log.Println("Fetching data and pushing to Pushgateway")
 
 	durations := map[string]int{
-		"15m": 900,
-		"1h":  3600,
-		"12h": 43200,
-		"24h": 86400,
+		"15m":  900,
+		"1h":   3600,
+		"12h":  43200,
+		"24h":  86400,
 	}
 
-	for durationName, duration := range durations {
-		log.Printf("Fetching prover speed for duration %s", durationName)
-		if err := fetchProverSpeed(addresses, duration, durationName); err != nil {
-			log.Printf("Error fetching prover speed for duration %s: %v", durationName, err)
+	for _, address := range addresses {
+		for durationName, duration := range durations {
+			log.Printf("Fetching prover speed for address %s and duration %s", address, durationName)
+			if err := fetchProverSpeed(address, duration, durationName); err != nil {
+				log.Printf("Error fetching prover speed for address %s and duration %s: %v", address, durationName, err)
+			}
 		}
-	}
 
-	log.Println("Fetching prover reward")
-	if err := fetchProverReward(addresses); err != nil {
-		log.Printf("Error fetching prover reward: %v", err)
-	}
+		log.Printf("Fetching prover reward for address %s", address)
+		if err := fetchProverReward(address); err != nil {
+			log.Printf("Error fetching prover reward for address %s: %v", address, err)
+		}
 
-	log.Println("Fetching prover latest height")
-	if err := fetchProverLatestHeight(addresses); err != nil {
-		log.Printf("Error fetching prover latest height: %v", err)
+		log.Printf("Fetching prover latest height for address %s", address)
+		if err := fetchProverLatestHeight(address); err != nil {
+			log.Printf("Error fetching prover latest height for address %s: %v", address, err)
+		}
 	}
 
 	log.Println("Fetching latest block")
 	if err := fetchLatestBlock(); err != nil {
 		log.Printf("Error fetching latest block: %v", err)
 	}
-
-	log.Println("Pushing metrics to Pushgateway")
-	if err := push.New(pushgatewayURL, "prover_metrics").
-		Collector(proverSpeed).
-		Collector(totalSpeed).
-		Collector(totalReward).
-		Collector(proverHeight).
-		Collector(latestBlockHeight).
-		Collector(proofTarget).
-		Collector(coinbaseReward).
-		Push(); err != nil {
-		log.Printf("Could not push to Pushgateway: %v", err)
-	} else {
-		log.Println("Metrics pushed successfully")
-	}
 }
 
-func fetchProverSpeed(addresses []string, duration int, durationName string) error {
+func fetchProverSpeed(address string, duration int, durationName string) error {
 	url := fmt.Sprintf("%s/api/v1/provers/prover_speed_list", apiBaseURL)
-	body := fmt.Sprintf(`{"address":%v,"duration":%d}`, toJSON(addresses), duration)
+	body := fmt.Sprintf(`{"address":["%s"],"duration":%d}`, address, duration)
 	data, err := fetchData(url, body)
 	if err != nil {
 		return err
@@ -176,30 +107,44 @@ func fetchProverSpeed(addresses []string, duration int, durationName string) err
 		return fmt.Errorf("could not unmarshal prover speed response: %w", err)
 	}
 
+	proverSpeed := prometheus.NewGauge(prometheus.GaugeOpts{
+		Name:        "prover_speed",
+		Help:        "Speed of the prover",
+		ConstLabels: prometheus.Labels{"address": address, "duration": durationName},
+	})
+	prometheus.MustRegister(proverSpeed)
+
 	for _, item := range result.Data.List {
 		speed, err := parseFloat(item.Speed)
 		if err != nil {
 			log.Printf("Invalid speed value: %v", item.Speed)
 			continue
 		}
-		proverSpeed.WithLabelValues(item.Address, durationName).Set(speed)
+		proverSpeed.Set(speed)
 		log.Printf("Set prover speed: address=%s, duration=%s, speed=%f", item.Address, durationName, speed)
 	}
+
+	totalSpeed := prometheus.NewGauge(prometheus.GaugeOpts{
+		Name:        "total_speed",
+		Help:        "Total speed",
+		ConstLabels: prometheus.Labels{"duration": durationName},
+	})
+	prometheus.MustRegister(totalSpeed)
 
 	totalSpeedValue, err := parseFloat(result.Data.Total)
 	if err != nil {
 		log.Printf("Invalid total speed value: %v", result.Data.Total)
 		return nil
 	}
-	totalSpeed.WithLabelValues(durationName).Set(totalSpeedValue)
+	totalSpeed.Set(totalSpeedValue)
 	log.Printf("Set total speed: duration=%s, total_speed=%f", durationName, totalSpeedValue)
 
-	return nil
+	return push.New(pushgatewayURL, "prover_metrics").Collector(proverSpeed).Collector(totalSpeed).Push()
 }
 
-func fetchProverReward(addresses []string) error {
+func fetchProverReward(address string) error {
 	url := fmt.Sprintf("%s/api/v1/provers/prover_reward_list", apiBaseURL)
-	body := fmt.Sprintf(`{"address":%v}`, toJSON(addresses))
+	body := fmt.Sprintf(`{"address":["%s"]}`, address)
 	data, err := fetchData(url, body)
 	if err != nil {
 		return err
@@ -219,22 +164,29 @@ func fetchProverReward(addresses []string) error {
 		return fmt.Errorf("could not unmarshal prover reward response: %w", err)
 	}
 
+	totalReward := prometheus.NewGauge(prometheus.GaugeOpts{
+		Name:        "total_reward",
+		Help:        "Total reward of the prover",
+		ConstLabels: prometheus.Labels{"address": address},
+	})
+	prometheus.MustRegister(totalReward)
+
 	for _, item := range result.Data.List {
 		totalRewardValue, err := parseFloat(item.TotalReward)
 		if err != nil {
 			log.Printf("Invalid total reward value: %v", item.TotalReward)
 			continue
 		}
-		totalReward.WithLabelValues(item.Address).Set(totalRewardValue)
+		totalReward.Set(totalRewardValue)
 		log.Printf("Set total reward: address=%s, total_reward=%f", item.Address, totalRewardValue)
 	}
 
-	return nil
+	return push.New(pushgatewayURL, "prover_metrics").Collector(totalReward).Push()
 }
 
-func fetchProverLatestHeight(addresses []string) error {
+func fetchProverLatestHeight(address string) error {
 	url := fmt.Sprintf("%s/api/v1/provers/prover_latest_height", apiBaseURL)
-	body := fmt.Sprintf(`{"address":%v}`, toJSON(addresses))
+	body := fmt.Sprintf(`{"address":["%s"]}`, address)
 	data, err := fetchData(url, body)
 	if err != nil {
 		return err
@@ -251,12 +203,19 @@ func fetchProverLatestHeight(addresses []string) error {
 		return fmt.Errorf("could not unmarshal prover latest height response: %w", err)
 	}
 
+	proverHeight := prometheus.NewGauge(prometheus.GaugeOpts{
+		Name:        "prover_height",
+		Help:        "Height of the prover",
+		ConstLabels: prometheus.Labels{"address": address},
+	})
+	prometheus.MustRegister(proverHeight)
+
 	for _, item := range result.Data {
-		proverHeight.WithLabelValues(item.Address).Set(float64(item.Height))
+		proverHeight.Set(float64(item.Height))
 		log.Printf("Set prover height: address=%s, height=%d", item.Address, item.Height)
 	}
 
-	return nil
+	return push.New(pushgatewayURL, "prover_metrics").Collector(proverHeight).Push()
 }
 
 func fetchLatestBlock() error {
@@ -280,9 +239,19 @@ func fetchLatestBlock() error {
 		return fmt.Errorf("could not unmarshal latest block response: %w", err)
 	}
 
+	latestBlockHeight := prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "latest_block_height",
+		Help: "Height of the latest block",
+	})
+	prometheus.MustRegister(latestBlockHeight)
 	latestBlockHeight.Set(float64(result.Data.Height))
 	log.Printf("Set latest block height: height=%d", result.Data.Height)
 
+	proofTarget := prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "proof_target",
+		Help: "Proof target of the latest block",
+	})
+	prometheus.MustRegister(proofTarget)
 	proofTargetValue, err := parseFloat(result.Data.ProofTarget)
 	if err != nil {
 		log.Printf("Invalid proof target value: %v", result.Data.ProofTarget)
@@ -291,6 +260,11 @@ func fetchLatestBlock() error {
 	proofTarget.Set(proofTargetValue)
 	log.Printf("Set proof target: proof_target=%f", proofTargetValue)
 
+	coinbaseReward := prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "coinbase_reward",
+		Help: "Coinbase reward of the latest block",
+	})
+	prometheus.MustRegister(coinbaseReward)
 	coinbaseRewardValue, err := parseFloat(result.Data.CoinbaseReward)
 	if err != nil {
 		log.Printf("Invalid coinbase reward value: %v", result.Data.CoinbaseReward)
@@ -299,7 +273,7 @@ func fetchLatestBlock() error {
 	coinbaseReward.Set(coinbaseRewardValue)
 	log.Printf("Set coinbase reward: coinbase_reward=%f", coinbaseRewardValue)
 
-	return nil
+	return push.New(pushgatewayURL, "latest_block_metrics").Collector(latestBlockHeight).Collector(proofTarget).Collector(coinbaseReward).Push()
 }
 
 func fetchData(url, body string) ([]byte, error) {
