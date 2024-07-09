@@ -82,18 +82,21 @@ func init() {
 func main() {
 	pflag.StringVar(&pushgatewayURL, "pushgateway", "http://pushgateway:9091", "URL of the Pushgateway")
 	pflag.StringVar(&apiBaseURL, "api", "http://localhost:8088", "Base URL of the API")
-	pflag.StringArrayVar(&addresses, "addresses", []string{
-		"aleo1ul89ek6egwjtljy6yhmyteyu9y077ruahwggzfh6sgjqp890y5xs6mz9pe",
-		"aleo1zp00ltnw23uvdq4spxax3zp84mt7pkvgyerlukxk5t443k6f5v9s9wem4l",
-	}, "Addresses to monitor")
+	pflag.StringArrayVar(&addresses, "addresses", []string{}, "Addresses to monitor")
 
 	pflag.DurationVar(&defaultDuration, "interval", 5*time.Minute, "Interval for fetching data")
 	pflag.Parse()
 
-	ticker := time.NewTicker(defaultDuration)
-	defer ticker.Stop()
+	if len(addresses) == 0 {
+		log.Fatal("No addresses provided")
+	}
 
 	log.Println("Starting prover monitor")
+
+	fetchDataAndPush() // 立即开始获取数据
+
+	ticker := time.NewTicker(defaultDuration)
+	defer ticker.Stop()
 
 	for {
 		select {
@@ -115,17 +118,25 @@ func fetchDataAndPush() {
 
 	for durationName, duration := range durations {
 		log.Printf("Fetching prover speed for duration %s", durationName)
-		fetchProverSpeed(addresses, duration, durationName)
+		if err := fetchProverSpeed(addresses, duration, durationName); err != nil {
+			log.Printf("Error fetching prover speed for duration %s: %v", durationName, err)
+		}
 	}
 
 	log.Println("Fetching prover reward")
-	fetchProverReward(addresses)
+	if err := fetchProverReward(addresses); err != nil {
+		log.Printf("Error fetching prover reward: %v", err)
+	}
 
 	log.Println("Fetching prover latest height")
-	fetchProverLatestHeight(addresses)
+	if err := fetchProverLatestHeight(addresses); err != nil {
+		log.Printf("Error fetching prover latest height: %v", err)
+	}
 
 	log.Println("Fetching latest block")
-	fetchLatestBlock()
+	if err := fetchLatestBlock(); err != nil {
+		log.Printf("Error fetching latest block: %v", err)
+	}
 
 	log.Println("Pushing metrics to Pushgateway")
 	if err := push.New(pushgatewayURL, "prover_metrics").
@@ -137,16 +148,19 @@ func fetchDataAndPush() {
 		Collector(proofTarget).
 		Collector(coinbaseReward).
 		Push(); err != nil {
-		log.Fatalf("Could not push to Pushgateway: %v", err)
+		log.Printf("Could not push to Pushgateway: %v", err)
+	} else {
+		log.Println("Metrics pushed successfully")
 	}
-
-	log.Println("Metrics pushed successfully")
 }
 
-func fetchProverSpeed(addresses []string, duration int, durationName string) {
+func fetchProverSpeed(addresses []string, duration int, durationName string) error {
 	url := fmt.Sprintf("%s/api/v1/provers/prover_speed_list", apiBaseURL)
 	body := fmt.Sprintf(`{"address":%v,"duration":%d}`, toJSON(addresses), duration)
-	data := fetchData(url, body)
+	data, err := fetchData(url, body)
+	if err != nil {
+		return err
+	}
 
 	var result struct {
 		Data struct {
@@ -159,7 +173,7 @@ func fetchProverSpeed(addresses []string, duration int, durationName string) {
 	}
 
 	if err := json.Unmarshal(data, &result); err != nil {
-		log.Fatalf("Could not unmarshal prover speed response: %v", err)
+		return fmt.Errorf("could not unmarshal prover speed response: %w", err)
 	}
 
 	for _, item := range result.Data.List {
@@ -175,16 +189,21 @@ func fetchProverSpeed(addresses []string, duration int, durationName string) {
 	totalSpeedValue, err := parseFloat(result.Data.Total)
 	if err != nil {
 		log.Printf("Invalid total speed value: %v", result.Data.Total)
-		return
+		return nil
 	}
 	totalSpeed.WithLabelValues(durationName).Set(totalSpeedValue)
 	log.Printf("Set total speed: duration=%s, total_speed=%f", durationName, totalSpeedValue)
+
+	return nil
 }
 
-func fetchProverReward(addresses []string) {
+func fetchProverReward(addresses []string) error {
 	url := fmt.Sprintf("%s/api/v1/provers/prover_reward_list", apiBaseURL)
 	body := fmt.Sprintf(`{"address":%v}`, toJSON(addresses))
-	data := fetchData(url, body)
+	data, err := fetchData(url, body)
+	if err != nil {
+		return err
+	}
 
 	var result struct {
 		Data struct {
@@ -197,7 +216,7 @@ func fetchProverReward(addresses []string) {
 	}
 
 	if err := json.Unmarshal(data, &result); err != nil {
-		log.Fatalf("Could not unmarshal prover reward response: %v", err)
+		return fmt.Errorf("could not unmarshal prover reward response: %w", err)
 	}
 
 	for _, item := range result.Data.List {
@@ -209,12 +228,17 @@ func fetchProverReward(addresses []string) {
 		totalReward.WithLabelValues(item.Address).Set(totalRewardValue)
 		log.Printf("Set total reward: address=%s, total_reward=%f", item.Address, totalRewardValue)
 	}
+
+	return nil
 }
 
-func fetchProverLatestHeight(addresses []string) {
+func fetchProverLatestHeight(addresses []string) error {
 	url := fmt.Sprintf("%s/api/v1/provers/prover_latest_height", apiBaseURL)
 	body := fmt.Sprintf(`{"address":%v}`, toJSON(addresses))
-	data := fetchData(url, body)
+	data, err := fetchData(url, body)
+	if err != nil {
+		return err
+	}
 
 	var result struct {
 		Data []struct {
@@ -224,18 +248,23 @@ func fetchProverLatestHeight(addresses []string) {
 	}
 
 	if err := json.Unmarshal(data, &result); err != nil {
-		log.Fatalf("Could not unmarshal prover latest height response: %v", err)
+		return fmt.Errorf("could not unmarshal prover latest height response: %w", err)
 	}
 
 	for _, item := range result.Data {
 		proverHeight.WithLabelValues(item.Address).Set(float64(item.Height))
 		log.Printf("Set prover height: address=%s, height=%d", item.Address, item.Height)
 	}
+
+	return nil
 }
 
-func fetchLatestBlock() {
+func fetchLatestBlock() error {
 	url := fmt.Sprintf("%s/api/v1/chain/latest_block", apiBaseURL)
-	data := fetchData(url, "")
+	data, err := fetchData(url, "")
+	if err != nil {
+		return err
+	}
 
 	log.Printf("Raw response from latest block: %s", string(data))
 
@@ -248,7 +277,7 @@ func fetchLatestBlock() {
 	}
 
 	if err := json.Unmarshal(data, &result); err != nil {
-		log.Fatalf("Could not unmarshal latest block response: %v", err)
+		return fmt.Errorf("could not unmarshal latest block response: %w", err)
 	}
 
 	latestBlockHeight.Set(float64(result.Data.Height))
@@ -257,7 +286,7 @@ func fetchLatestBlock() {
 	proofTargetValue, err := parseFloat(result.Data.ProofTarget)
 	if err != nil {
 		log.Printf("Invalid proof target value: %v", result.Data.ProofTarget)
-		return
+		return nil
 	}
 	proofTarget.Set(proofTargetValue)
 	log.Printf("Set proof target: proof_target=%f", proofTargetValue)
@@ -265,34 +294,36 @@ func fetchLatestBlock() {
 	coinbaseRewardValue, err := parseFloat(result.Data.CoinbaseReward)
 	if err != nil {
 		log.Printf("Invalid coinbase reward value: %v", result.Data.CoinbaseReward)
-		return
+		return nil
 	}
 	coinbaseReward.Set(coinbaseRewardValue)
 	log.Printf("Set coinbase reward: coinbase_reward=%f", coinbaseRewardValue)
+
+	return nil
 }
 
-func fetchData(url, body string) []byte {
+func fetchData(url, body string) ([]byte, error) {
 	req, err := http.NewRequest("POST", url, strings.NewReader(body))
 	if err != nil {
-		log.Fatalf("Could not create request: %v", err)
+		return nil, fmt.Errorf("could not create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Fatalf("Could not fetch data: %v", err)
+		return nil, fmt.Errorf("could not fetch data: %w", err)
 	}
 	defer resp.Body.Close()
 
 	data, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		log.Fatalf("Could not read response: %v", err)
+		return nil, fmt.Errorf("could not read response: %w", err)
 	}
 
 	log.Printf("Response from %s: %s", url, string(data))
 
-	return data
+	return data, nil
 }
 
 func toJSON(v interface{}) string {
