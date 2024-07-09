@@ -26,7 +26,6 @@ func main() {
 	pflag.StringVar(&pushgatewayURL, "pushgateway", "http://pushgateway:9091", "URL of the Pushgateway")
 	pflag.StringVar(&apiBaseURL, "api", "http://localhost:8088", "Base URL of the API")
 	pflag.StringArrayVar(&addresses, "addresses", []string{}, "Addresses to monitor")
-
 	pflag.DurationVar(&defaultDuration, "interval", 5*time.Minute, "Interval for fetching data")
 	pflag.Parse()
 
@@ -53,10 +52,10 @@ func fetchDataAndPush() {
 	log.Println("Fetching data and pushing to Pushgateway")
 
 	durations := map[string]int{
-		"15m": 900,
-		"1h":  3600,
-		"12h": 43200,
-		"24h": 86400,
+		"15m":  900,
+		"1h":   3600,
+		"12h":  43200,
+		"24h":  86400,
 	}
 
 	for _, address := range addresses {
