@@ -1,7 +1,6 @@
 package main
 
 import (
-	"aleo-prover-monitor/prometh"
 	"bufio"
 	"bytes"
 	"encoding/json"
@@ -12,6 +11,8 @@ import (
 	"net/http"
 	"os"
 	"time"
+
+	"aleo-prover-monitor/prometh"
 )
 
 var apiBaseURL = flag.String("api", "http://localhost:8088", "Base URL of the API")
@@ -91,9 +92,11 @@ func main() {
 		for _, d := range duration {
 			speedRespon, err := SpeedSendRequest(SpeedURL, SpeedRequestPayload{addresses, d})
 			if err != nil {
-				log.Printf("%s 请求失败:%s", SpeedURL, err)
+				log.Printf("%s 请求失败:%s\n", SpeedURL, err)
+				time.Sleep(time.Duration(*interval) * time.Minute)
 				continue
 			}
+			log.Printf("%s 请求成功\n", SpeedURL)
 
 			for _, r := range speedRespon.Data.List {
 				prometh.SpeedPush(*pushGatewayAddr, r.Address, d, r.Speed)
@@ -106,6 +109,7 @@ func main() {
 		rewardRespon, err := RewardSendRequest(RewardURL, RewardRequestPayload{addresses})
 		if err != nil {
 			log.Printf("%s 请求失败:%s", RewardURL, err)
+			time.Sleep(time.Duration(*interval) * time.Minute)
 			continue
 		}
 
@@ -119,8 +123,10 @@ func main() {
 		heightRespon, err := HeightSendRequest(HeightURL, HeightRequestPayload{addresses})
 		if err != nil {
 			log.Printf("%s 请求失败:%s", HeightURL, err)
+			time.Sleep(time.Duration(*interval) * time.Minute)
 			continue
 		}
+		log.Printf("%s 请求成功\n", HeightURL)
 
 		for _, r := range heightRespon.Data {
 			prometh.HeightPush(*pushGatewayAddr, r.Address, r.Height)
@@ -131,8 +137,10 @@ func main() {
 		blockRespon, err := BlockSendRequest(BlockURL)
 		if err != nil {
 			log.Printf("%s 请求失败:%s", BlockURL, err)
+			time.Sleep(time.Duration(*interval) * time.Minute)
 			continue
 		}
+		log.Printf("%s 请求成功\n", BlockURL)
 
 		prometh.BlockPush(*pushGatewayAddr, blockRespon.Data.Height, blockRespon.Data.ProofTarget, blockRespon.Data.CoinbaseReward)
 
