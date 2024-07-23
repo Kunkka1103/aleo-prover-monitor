@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"aleo-prover-monitor/prometh"
@@ -19,6 +20,7 @@ var apiBaseURL = flag.String("api", "http://localhost:8088", "Base URL of the AP
 var pushGatewayAddr = flag.String("pushGateway", "http://pushgateway:9091", "pushgateway addr")
 var interval = flag.Int("interval", 5, "check interval(min)")
 var addressFile = flag.String("addrFile", "", "addressFile")
+var durationFile = flag.String("durFile", "", "durationFile")
 
 type SpeedRequestPayload struct {
 	Address  []string `json:"address"`
@@ -78,13 +80,28 @@ type BlockData struct {
 
 func main() {
 	flag.Parse()
-	addresses, err := readAddressesFromFile(*addressFile)
+	addresses, err := readLinesFromFile(*addressFile)
 	if err != nil {
-		fmt.Println(err)
-		return
+		log.Fatalf("Error reading addresses: %v", err)
 	}
 
-	duration := []int{900, 3600, 43200, 86400}
+	log.Printf("Address: %v", addresses)
+
+	durations, err := readLinesFromFile(*durationFile)
+	if err != nil {
+		log.Fatalf("Error reading durations: %v", err)
+	}
+
+	var duration []int
+	for _, d := range durations {
+		di, err := strconv.Atoi(d)
+		if err != nil {
+			log.Fatalf("Wrong fromat:%s", err)
+		}
+		duration = append(duration, di)
+	}
+
+	log.Printf("Duration: %v", duration)
 
 	for {
 		//Speed
@@ -284,7 +301,7 @@ func BlockSendRequest(url string) (BlockData, error) {
 	return response, nil
 }
 
-func readAddressesFromFile(filename string) ([]string, error) {
+func readLinesFromFile(filename string) ([]string, error) {
 	file, err := os.Open(filename)
 	if err != nil {
 		return nil, fmt.Errorf("打开文件错误: %v", err)
